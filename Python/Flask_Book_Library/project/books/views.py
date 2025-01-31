@@ -2,11 +2,29 @@ from flask import render_template, Blueprint, request, redirect, url_for, jsonif
 from project import db
 from project.books.models import Book
 from project.books.forms import CreateBook
-
+import bleach
+import re
 
 # Blueprint for books
 books = Blueprint('books', __name__, template_folder='templates', url_prefix='/books')
 
+def checker(name, author, year_published):
+    if len(name) < 1 or len(name) > 50:
+        raise ValueError("Book name must contain 1-50 characters")
+    if len(author) < 1 or len(author) > 50:
+        raise ValueError("Author field must contain 1-50 characters")
+    if not re.match(r"^[a-zA-Z\s]+$", author):
+        raise ValueError("Author must only contain letters and spaces")
+    if not re.match(r"^[a-zA-Z\s]+$", name):
+        raise ValueError("Author must only contain letters and spaces")
+    
+    try:
+        year_published = int(year_published)
+    except ValueError:
+        raise ValueError("Year published must be an integer")
+
+    if not (-10000 <= year_published <= 2025):
+        raise ValueError("Year published must be between -10000 and 2025")
 
 # Route to display books in HTML
 @books.route('/', methods=['GET'])
@@ -32,16 +50,26 @@ def list_books_json():
 def create_book():
     data = request.get_json()
 
-    new_book = Book(name=data['name'], author=data['author'], year_published=data['year_published'], book_type=data['book_type'])
+    # Sanitize inputs to prevent XSS attacks
+    name = bleach.clean(data['name'])
+    author = bleach.clean(data['author'])
+    year_published = data['year_published']
+    book_type = bleach.clean(data['book_type'])
+
 
     try:
-        # Add the new book to the session and commit to save to the database
+        checker(name, author, year_published)
+    
+        new_book = Book(name, author, year_published, book_type)
+    except Exception as e:
+        return jsonify({'error': f'{str(e)}'}), 400
+
+    try:
         db.session.add(new_book)
         db.session.commit()
         print('Book added successfully')
         return redirect(url_for('books.list_books'))
     except Exception as e:
-        # Handle any exceptions, such as database errors
         db.session.rollback()
         print('Error creating book')
         return jsonify({'error': f'Error creating book: {str(e)}'}), 500
@@ -50,35 +78,31 @@ def create_book():
 # Route to update an existing book
 @books.route('/<int:book_id>/edit', methods=['POST'])
 def edit_book(book_id):
-    # Get the book with the given ID
     book = Book.query.get(book_id)
     
-    # Check if the book exists
     if not book:
         print('Book not found')
         return jsonify({'error': 'Book not found'}), 404
 
     try:
-        # Get data from the request as JSON
         data = request.get_json()
         
-        # Update book details
-        book.name = data.get('name', book.name)  # Update if data exists, otherwise keep the same
-        book.author = data.get('author', book.author)
+        # Sanitize inputs before updating the database
+        book.name = bleach.clean(data.get('name', book.name))
+        book.author = bleach.clean(data.get('author', book.author))
         book.year_published = data.get('year_published', book.year_published)
-        book.book_type = data.get('book_type', book.book_type)
+        book.book_type = bleach.clean(data.get('book_type', book.book_type))
         
-        # Commit the changes to the database
+        checker(book.name, book.author, book.year_published)
+        
         db.session.commit()
         print('Book edited successfully')
         return jsonify({'message': 'Book updated successfully'})
     except Exception as e:
-        # Handle any exceptions
         db.session.rollback()
         print('Error updating book')
         return jsonify({'error': f'Error updating book: {str(e)}'}), 500
-
-
+    
 # Route to fetch existing book data for editing
 @books.route('/<int:book_id>/edit-data', methods=['GET'])
 def get_book_for_edit(book_id):
@@ -99,7 +123,6 @@ def get_book_for_edit(book_id):
     }
     
     return jsonify({'success': True, 'book': book_data})
-
 
 # Route to delete a book
 @books.route('/<int:book_id>/delete', methods=['POST'])

@@ -1,5 +1,6 @@
 from project import db, app
-
+import re
+import bleach
 
 # Customer model
 class Customer(db.Model):
@@ -9,9 +10,10 @@ class Customer(db.Model):
     city = db.Column(db.String(64))
     age = db.Column(db.Integer)
 
-    def __init__(self, name, city, age):
-        self.name = name
-        self.city = city
+    def __init__(self, name, city, age): 
+        # Sanitize input using Bleach
+        self.name = bleach.clean(name)
+        self.city = bleach.clean(city)
         self.age = age
 
     def __repr__(self):
